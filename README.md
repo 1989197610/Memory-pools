@@ -249,3 +249,92 @@ void MyFree(Space* pav, WORD* p)//释放p
 ## 四.内存池设计之伙伴系统
 
 伙伴系统(buddysystem)是操作系统中用到的另一种动态存储管理方法。它和边界标识法类似,在用户提出申请时,分配一块大小“恰当”的内存区给用户;反之,在用户释放内存区时即回收。所不同的是:在伙伴系统中,无论是占用块或空闲块,其大小均为2的k次幂(k为某个正整数)。例如:当用户申请n个字的内存区时,分配的空闲块大小为2^k个字(2^(k-1)<n<=2^k)。若总的可利用内存容量为 2^m个字,则空闲块的大小只可能为2^0、2^1…、2^m。
+
+### 1.表结构
+假设系统的可利用内存空间容量为2^m个字,则在开始运行时整个内存区是一个大小为2^m的空闲块,在运行了一段时间之后,被分隔成若干占用块和空闲块。为了再分配时查找方便起见,我们将所有大小相同的空闲块放在一张子表中,每个子表是一个双向链表,这样的链表可能有m+1个,将这m十1个表头指针用顺序表组织成一个表,这就是伙伴系统中的可利用空间表。
+双向链表中的结点结构如下:
+
+```c
+#define m 16 //内存池总容量2^16即65536字WORD_b
+
+typedef struct WORD_b{   //伙伴系统的字 (结点结构)
+    struct WORD_b *llink;//前驱指针
+    int tag;             //标识,0空闲,1占用
+    int kval;            //块大小,2的幂次k(保存的是k值)
+    struct WORD_b *rlink;//后继指针
+}WORD_b;
+typedef struct HeadNode{//可利用空间表
+    int nodesize;       //该链表的空闲块大小
+    WORD_b *first;      //链表表头指针
+}FreeList[m+1];     
+```
+
+![image](https://github.com/user-attachments/assets/b18ac496-6e45-443a-8a71-02a6c23761cc)
+a空闲块  b表的初始状态 c分配前的表 d分配后的表
+
+其中head为结点头部,是一个由4个域组成的记录,其中的 llink 域和rlink域分别指向同一链表中的前驱和后继结点;tag 域为值取"0"空闲,"1"占用,标志域,kval域的值为2的幂次k;space是一个大小为2^k-1个字的连续内存空间(和前面类似,仍假设 head 占一个字的空间)。
+
+### 2.初始化
+
+```c
+#define _CRT_SECURE_NO_WARNINGS //这一句必须放在第一行
+#include <stdio.h> //标准输入输出文件
+#include <stdlib.h>
+#include <assert.h>
+
+#define m 16 //内存池总容量2^16即65536字WORD_b
+
+typedef struct WORD_b {   //伙伴系统的字 (结点结构)
+    struct WORD_b* llink;//前驱指针
+    int tag;             //标识,0空闲,1占用
+    int kval;            //块大小,2的幂次k(保存的是k值)
+    struct WORD_b* rlink;//后继指针
+}WORD_b,*Space_b;
+typedef struct HeadNode {//可利用空间表
+    int nodesize;       //该链表的空闲块大小
+    WORD_b* first;      //链表表头指针
+}FreeList[m + 1];
+
+static Space_b pav;//内存池的起始地址
+
+void InitMem(FreeList *pf)//创建并初始化内存池
+{
+    //创建内存池
+    g_pav = (WORD_b*)malloc((1<<m) * sizeof(WORD_b));//1<<1->2 ,1<<2->4,1<<3->8
+
+    assert(g_pav != NULL);
+    if (g_pav == NULL)
+    {
+        printf("内存池初始化失败!!!\n");
+        return;
+    }
+    //初始化内存池
+    g_pav->llink = g_pav->rlink = g_pav;
+    g_pav->tag = 0;
+    g_pav->kval = m;
+
+
+    //初始化可利用空间表
+    for (int i = 0; i < m+1; i++)
+    {
+        (*pf)[i].nodesize = 1 << i;
+        (*pf)[i].first = NULL;
+    }
+    (*pf)[m].first = g_pav;//把内存接到可利用空间表
+}
+
+int main()
+{
+    FreeList fl;
+    InitMem(&fl);
+
+	return 0;
+}
+```
+
+![image](https://github.com/user-attachments/assets/3907f9da-9aef-450a-addb-e8174318884b)
+
+
+
+
+
