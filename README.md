@@ -334,6 +334,140 @@ int main()
 
 ![image](https://github.com/user-attachments/assets/3907f9da-9aef-450a-addb-e8174318884b)
 
+### 3.分配算法
+当用户提出大小为n的内存请求时,首先在可利用表上寻找结点大小与n相配的子表,若此子表非空,则将子表中任意一个结点分配之即可;若此子表为空,则需从结点更大的非空子表中去查找,直至找到一个空闲块,则将其中一部分分配给用户,而将剩余部分插入相应的子表中。
+
+![image](https://github.com/user-attachments/assets/33e6eedc-a31d-42e5-974d-4ca30cc4e33d)
+
+若 2^(k-1)<n<=2^k,且2^k的子表不空,则只要删除此链表中第一个结点并分配给用户即可;
+若2^(k-2)<n<=2^(k-1),此时由于结点大小为2^(k-1)的子表为空,则需从结点大小为2^k的子表中取出一块,将其中一半分配给用户,剩余的一半作为一个新结点插人在结点大小为2^(k-1)的子表中,分配后如图所示。
+
+![image](https://github.com/user-attachments/assets/75daae19-30ca-4fc0-8537-00c9c687181c)
+
+若 2^(k-i-1)<n<=2^(k-i)(i为小于k的整数),并且所有结点小于2^k 的子表均为空,则同样需从结点大小为2^k的子表中取出一块,将其中2^(k-i)的一小部分分配给用户,剩余部分分割成若干个结点分别插人在结点大小为2^(k-i)、2^(k-i+1)…、2^(k-1)的子表中。假设从第k+1个子表中删除的结点的起始地址为p,且假设分配给用户的占用块的初始地址为户(占用块为该空闲块的低地址区)，则插入上述子表的新结点的起始地址分别为
+p+2^(k-i)、p+2^(k-i+1)、…、p+2^(k-1),如下图所示(图中i=3):
+
+![image](https://github.com/user-attachments/assets/1a38131d-ab5e-4046-8802-54807f2695b2)
+
+```C
+//分配内存
+//pf可利用空间表,n申请的字(WORD_b)
+WORD_b* MyMalloc(FreeList* pf, int n)
+{
+    if (n <= 0)
+        return NULL;
+    int i;
+    for (i = 0; i < m + 1; i++)//找合适的空闲块
+    {
+        //空闲块大小>=n且后面有结点
+        if ((*pf)[i].nodesize >= n && (*pf)[i].first != NULL)
+            break;
+    }
+    if (i == m + 1)//没有找到
+        return NULL;
+    //处理i后面的第一个结点(1.从链表中剔除,2.分裂剩余部分)
+    WORD_b* p = (*pf)[i].first;
+    if (p->rlink == p)//唯一的结点
+        (*pf)[i].first = NULL;
+    else
+    {
+        (*pf)[i].first = p->rlink;//头指针指向下一个结点
+        //把p从链表中剔除
+        p->llink->rlink = p->rlink;
+        p->rlink->llink = p->llink;
+    }
+
+    //分裂剩余部分(从下往上,从大到小)
+    for (i=i-1; (*pf)[i].nodesize >= n; i--)
+    {
+        WORD_b* q = p + (*pf)[i].nodesize; //分裂的新节点
+        q->llink = q->rlink = q;
+        q->tag = 0;
+        q->kval = i;
+
+        (*pf)[i].first = q;
+    }
+
+    //处理分配出去的内存
+    p->tag = 1;
+    p->kval = i + 1;
+
+    return p;
+}
+```
+### 4.回收算法
+在用户释放占用块时,系统需将这新的空闲块插入到可利用空间表中,这里,同样有一个地址相邻的空闲块归并成大块的问题。但是在伙伴系统中仅考虑互为“伙伴”的两个空闲块的和并。
+何谓“伙伴”?如前所述,在分配时经常需要将一个大的空闲块分裂成两个大小相等的存储区,这两个由同一大块分裂出来的小块就称之“互为伙伴”。
+由此,在回收空闲块时,应首先判别其伙伴是否为空闲块,若否,则只要将释放的空闲块简单插人在相应子表中即可;若是,则需在相应子表中找到其伙伴并删除之,然后再判断合并后的空闲块的伙伴是否是空闲块。依此重复,直到归并所得空闲块的伙伴不是空闲块时,再插人到相应的子表中去。
+
+![image](https://github.com/user-attachments/assets/ae61ae26-74ce-4e48-b169-d5307ea11b95)
+
+
+```C
+//释放占用块p到可利用空间表pf中
+void MyFree(FreeList* pf, WORD_b* p)
+{
+    if (p == NULL)
+        return;
+    WORD_b* q; //伙伴地址
+    int flg = 0;//flg=0,p是左块;flg=1,p是右块
+    int i;
+    for (i = p->kval; i < m; i++)
+    {
+        //判断自己是谁(是左块还是右块)?
+        if ((p - g_pav) % (1 << (p->kval + 1)) == 0)//p-g_pav:相对地址,  p是左块
+        {
+            flg = 0;//p是左块
+            q = p + (1 << p->kval);
+        }
+        else //p是右块
+        {
+            flg = 1;//p是右块
+            q = p - (1 << p->kval);
+        }
+
+        if (q->tag == 1)//伙伴是占用块
+            break;
+        else //伙伴是空闲块,需要合并
+        {
+            //把伙伴q从相应的链表中删除
+            if (q->rlink == q)//当前链表只有一个结点
+                (*pf)[i].first = NULL;
+            else //不止一个结点,需要把q从链表中剔除
+            {
+                if ((*pf)[i].first == q)//q是链表最前面的结点
+                    (*pf)[i].first = q->rlink;
+                //把q剔除
+                q->llink->rlink = q->rlink;
+                q->rlink->llink = q->llink;
+            }
+            if (flg == 0)//p是左块,把伙伴合并到p中
+            {
+                p->tag = 0;
+                p->kval += 1; //指数+1
+            }
+            else //p是右块,把p合并到伙伴q中
+            {
+                q->kval += 1;
+                p = q;
+            }
+        }
+    }
+    
+    //把p插入到相应的位置
+    if ((*pf)[i].first == NULL)//p是插入的第一个结点
+    {
+        p->llink = p->rlink = p;
+        (*pf)[i].first = p;
+    }
+    else //p不是当前链表的第一个结点
+    {
+        WORD_b* p1 = (*pf)[i].first->llink;//最后一个结点,也将成为p的前驱
+        WORD_b* p2 = (*pf)[i].first;//第一个结点,也将称为p的后继
+        p->llink = p1;
+}
+```
+
 
 
 
